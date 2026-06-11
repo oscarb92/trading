@@ -1,0 +1,23 @@
+enabled: false
+mode: auto_testnet
+schedule:
+  cron: 0 * * * *
+  managed_by: usuario
+  ia_can_pause: true
+symbols:
+- BTC/USDT
+- ETH/USDT
+risk:
+  max_per_trade_pct: 1.0
+  max_daily_loss_pct: 3.0
+  max_open_positions: 3
+  require_stop_loss: true
+forecast:
+  horizon: 4h
+  min_confidence: 0.0
+notifications:
+  channel: chat
+  notify_on:
+  - recomendacion
+  - ejecucion
+  - null

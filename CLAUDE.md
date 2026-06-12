@@ -11,7 +11,7 @@ Fases 2-3 completas. **Pivote 2026-06-11 (opción A):** la validación walk-forw
 
 ```bash
 pip install -r requirements.txt        # deps: ccxt, pandas, numpy, pyyaml, streamlit
-pytest -q                              # tests (37 en verde: core+correcciones+backtest+datos+señales+validación+riesgo+multimercado+cross-sectional+velas)
+pytest -q                              # tests (40 en verde: core+correcciones+backtest+datos+señales+validación+riesgo+multimercado+cross-sectional+velas+calibración)
 python cross_asset.py                  # validación OOS sobre 16 mercados (yfinance) → reports/cross_asset.md
 python cross_sectional.py              # prueba market-neutral (alfa vs beta) → reports/cross_sectional.md
 python candles_validate.py             # patrones de velas japonesas, validación OOS → reports/candlestick.md

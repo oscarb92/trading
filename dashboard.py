@@ -488,6 +488,28 @@ with tab_wallets:
 # ------------------------------------------------------------------ Cycle
 with tab_cycle:
     st.subheader("Correr ciclo (datos → predicción → riesgo → decisión)")
+    st.warning("**Demo de simulación.** El forecast baseline NO tiene edge validado OOS y sus "
+               "probabilidades NO están calibradas (skill negativo, ver abajo). Las propuestas "
+               "son material de sandbox para ejercitar el flujo paper, no recomendaciones.")
+    with st.expander("📏 Calibración del forecast (reliability curve) — por qué no fiarse del %"):
+        from src import calibration as cal_mod
+
+        @st.cache_data(ttl=3600, show_spinner=False)
+        def _calibration(sym: str, tf: str):
+            d = _load_tf(sym, tf)
+            return cal_mod.reliability(d) if len(d) > 1000 else None
+
+        csym = st.selectbox("Histórico", ["BTC/USDT", "ETH/USDT"], key="cal_sym")
+        ctf = st.radio("Timeframe", ["1h", "4h"], horizontal=True, key="cal_tf")
+        rcal = _calibration(csym, ctf)
+        if rcal is None:
+            st.caption("Sin histórico local suficiente para calibrar.")
+        else:
+            (st.error if rcal["skill"] <= 0 else st.warning)(cal_mod.verdict(rcal))
+            st.dataframe(rcal["table"], width="stretch", hide_index=True)
+            st.caption("Calibrado = la columna 'frec. observada' sigue a 'prob. predicha'. "
+                       "Aquí no lo hace: la frecuencia real se queda pegada a ~50% diga lo "
+                       "que diga el modelo. Por eso Kelly con estas probabilidades sería ruina.")
     if st.button("▶️ Ejecutar una pasada", type="primary"):
         result = run_cycle(cfg, pf)
         st.session_state["last_result"] = result

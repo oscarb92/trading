@@ -71,6 +71,51 @@ def _ppy_for(symbol: str, tf: str) -> float | None:
     return md.periods_per_year(symbol, tf) if tf == "1d" else None
 
 
+# --- Ciclo automático EN-APP: corre solo mientras el dashboard está abierto. ---
+# Sustituye a la tarea programada del SO: cero consumo con la app cerrada, y se
+# pausa desde la propia UI (toggle) o con el kill-switch del sidebar.
+LAST_CYCLE_PATH = Path(__file__).resolve().parent / "state" / "last_cycle.json"
+
+
+def _last_cycle_ts() -> float:
+    try:
+        return float(json.loads(LAST_CYCLE_PATH.read_text(encoding="utf-8"))["ts"])
+    except Exception:
+        return 0.0
+
+
+def _mark_cycle_ts(ts: float) -> None:
+    LAST_CYCLE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    LAST_CYCLE_PATH.write_text(json.dumps({"ts": ts}), encoding="utf-8")
+
+
+@st.fragment(run_every="60s")
+def _auto_cycle_tick():
+    """Tic periódico (solo refresca este fragmento, no toda la app). Si el ciclo
+    automático está activo y ya tocó por intervalo, corre UNA pasada del engine."""
+    import time as _t
+    c = load_config()
+    if not c["schedule"].get("app_auto"):
+        st.caption("⏸️ Ciclo automático en-app apagado. Actívalo arriba: correrá solo "
+                   "mientras esta app esté abierta.")
+        return
+    every_s = max(int(c["schedule"].get("app_every_min", 60)), 1) * 60
+    now = _t.time()
+    elapsed = now - _last_cycle_ts()
+    if elapsed >= every_s:
+        _mark_cycle_ts(now)              # marcar ANTES de correr: evita dobles pasadas
+        res = run_cycle(c, Portfolio.load())
+        st.session_state["last_result"] = res
+        st.session_state["last_auto_at"] = _t.strftime("%H:%M:%S")
+        st.rerun(scope="app")            # refrescar propuestas/portfolio en toda la app
+    else:
+        remaining = int((every_s - elapsed) / 60) + 1
+        prev = st.session_state.get("last_auto_at")
+        st.caption(f"⏱️ Ciclo automático ACTIVO mientras la app esté abierta · próxima "
+                   f"pasada en ~{remaining} min" + (f" · última: {prev}" if prev else "") +
+                   ". Al cerrar la app no corre nada.")
+
+
 def _zoom_chart(series: pd.Series, key: str, title: str, area: bool = False,
                 extra: pd.Series | None = None, extra_title: str = "") -> None:
     """Gráfica Altair ESTÁTICA (no captura la rueda del ratón al hacer scroll) con
@@ -510,6 +555,24 @@ with tab_cycle:
             st.caption("Calibrado = la columna 'frec. observada' sigue a 'prob. predicha'. "
                        "Aquí no lo hace: la frecuencia real se queda pegada a ~50% diga lo "
                        "que diga el modelo. Por eso Kelly con estas probabilidades sería ruina.")
+
+    sc1, sc2 = st.columns([3, 1])
+    cyc_auto = sc1.toggle("⏱️ Ciclo automático mientras la app esté abierta",
+                          value=bool(cfg["schedule"].get("app_auto", False)), key="cyc_auto",
+                          help="Sin tarea programada del sistema: corre solo con el dashboard "
+                               "abierto. Al cerrarlo, cero consumo. También respeta el kill-switch.")
+    cyc_every = sc2.number_input("Cada (min)", 5, 720,
+                                 int(cfg["schedule"].get("app_every_min", 60)), 5, key="cyc_every")
+    if (bool(cyc_auto) != bool(cfg["schedule"].get("app_auto", False))
+            or int(cyc_every) != int(cfg["schedule"].get("app_every_min", 60))):
+        fresh = load_config()                      # persistir SOLO estas dos claves
+        fresh["schedule"]["app_auto"] = bool(cyc_auto)
+        fresh["schedule"]["app_every_min"] = int(cyc_every)
+        save_config(fresh)
+        cfg["schedule"]["app_auto"] = bool(cyc_auto)
+        cfg["schedule"]["app_every_min"] = int(cyc_every)
+    _auto_cycle_tick()
+
     if st.button("▶️ Ejecutar una pasada", type="primary"):
         result = run_cycle(cfg, pf)
         st.session_state["last_result"] = result

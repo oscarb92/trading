@@ -10,9 +10,9 @@ Cerebro de la automatización. Lee `automation_config.yaml` y ejecuta UNA pasada
 ## Código real (usar, no reinventar)
 El ciclo ya está implementado en `src/engine.py::run_cycle`. Ejecutar con:
 `python run.py` (CLI) o desde la pestaña 🔄 Ciclo de `dashboard.py`.
-**Tarea programada real:** "TradingApp-PaperCycle" (Programador de tareas de Windows,
-cada hora, lanza `run_cycle.bat` → log en `logs/cycle.log`).
-Esta skill orquesta y reporta; la lógica vive en `src/`.
+**Automatización real: ciclo EN-APP** (toggle "Ciclo automático mientras la app esté
+abierta" en la pestaña Ciclo; corre solo con el dashboard abierto — decisión del usuario,
+sin tareas del SO). Esta skill orquesta y reporta; la lógica vive en `src/`.
 
 > Contexto: el forecast baseline NO tiene edge OOS y sus probabilidades están
 > descalibradas (skill negativo, ver `src/calibration.py`). El ciclo es una **demo de

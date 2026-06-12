@@ -17,10 +17,13 @@ Controla CUÁNDO y EN QUÉ MODO corre la automatización. Es el panel de mando.
    - **Frecuencia**: actualizar `schedule.cron` Y la tarea de Windows (ver abajo).
    - **Modo**: `recomendacion` / `auto_testnet`. (`auto_live` está CONGELADO: no ofrecerlo.)
    - **Encender/apagar**: `enabled: true|false` (kill-switch; también en el sidebar del dashboard).
-3. **Tarea programada real: "TradingApp-PaperCycle"** (lanza `run_cycle.bat` cada hora; log en `logs/cycle.log`):
-   - Ver/gestionar en GUI: Programador de tareas (`taskschd.msc`) → Biblioteca → TradingApp-PaperCycle.
-   - Pausar: `schtasks /Change /TN "TradingApp-PaperCycle" /Disable` · Reanudar: `/Enable`.
-   - Probar ya: `schtasks /Run /TN "TradingApp-PaperCycle"` · Cambiar cadencia: recrear con `/SC` y `/MO`.
+3. **Ciclo automático EN-APP** (sin tarea del SO, por decisión del usuario — cero consumo
+   con la app cerrada): pestaña 🔄 Ciclo del dashboard → toggle "Ciclo automático mientras
+   la app esté abierta" + "Cada (min)". Persistido en `schedule.app_auto` / `app_every_min`;
+   implementado con `@st.fragment(run_every="60s")` + marca en `state/last_cycle.json`
+   (evita dobles pasadas con varias pestañas).
+   - Pausar: apagar ese toggle, o el kill-switch del sidebar (`enabled: false`), o cerrar la app.
+   - NO crear tareas programadas de Windows salvo que el usuario lo pida explícitamente.
 4. Confirmar al usuario el nuevo estado y anotarlo en `MEMORIA_PROYECTO.md`.
 
 ## Ajuste autónomo (si managed_by: ia)

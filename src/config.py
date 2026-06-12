@@ -11,7 +11,9 @@ CONFIG_PATH = ROOT / "automation_config.yaml"
 DEFAULTS: dict[str, Any] = {
     "enabled": False,
     "mode": "recomendacion",
-    "schedule": {"cron": "0 * * * *", "managed_by": "usuario", "ia_can_pause": True},
+    "schedule": {"cron": "0 * * * *", "managed_by": "usuario", "ia_can_pause": True,
+                 # Ciclo en-app: corre solo mientras el dashboard está abierto (sin tarea de SO)
+                 "app_auto": False, "app_every_min": 60},
     "symbols": ["BTC/USDT", "ETH/USDT"],
     "risk": {
         "max_per_trade_pct": 1.0,

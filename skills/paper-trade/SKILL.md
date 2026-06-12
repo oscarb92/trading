@@ -27,7 +27,8 @@ fees (0.1%) y slippage; el estado persiste en `state/portfolio.json` (`src/portf
 - Saldo simulado: `python run.py --deposit N` o pestaña 💼 Portfolio del dashboard.
 - Modelo contable PnL/margen: equity = cash + PnL no realizado (no doble-contar notional).
 - Si hay claves de testnet, en `.env`, nunca en git. Validar saldo y límites antes de la orden.
-- El paper trading continuo corre con la tarea programada "TradingApp-PaperCycle".
+- El paper trading continuo corre con el ciclo EN-APP (toggle en la pestaña 🔄 Ciclo,
+  solo mientras el dashboard está abierto).
 
 ## Salida
 Confirmación de la operación simulada + estado actualizado del portfolio.

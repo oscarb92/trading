@@ -1,39 +1,32 @@
 ---
 name: forecast
-description: Generar una predicción del movimiento futuro de un símbolo con su probabilidad y nivel de confianza, en un horizonte dado. Usar cuando el usuario pida "predicción", "qué va a pasar con", "pronóstico", "probabilidad de subida en las próximas horas" o cuando el ciclo automático necesite una previsión.
+description: Generar la predicción del baseline (dirección, probabilidad, confianza) que consume el ciclo automático, y explicar su (falta de) fiabilidad medida. Usar cuando el usuario pida "predicción", "qué va a pasar con", "pronóstico", "probabilidad de subida" o cuando el ciclo necesite una previsión.
 ---
 
 # Skill: forecast
 
-Produce la PREDICCIÓN que alimenta la decisión. Distinta de `signal`: `forecast` es la
-predicción formal que consume el ciclo automático (engine); `signal` es análisis ad-hoc
-de indicadores/edge cuando el usuario pregunta por un símbolo.
+Produce la PREDICCIÓN que alimenta el ciclo (engine). Distinta de `signal`: `forecast` es
+la salida formal del baseline; `signal` es análisis ad-hoc por familias de estrategia.
 
 ## Código real (usar, no reinventar)
-Baseline implementado en `src/forecast.py::predict` (momentum+tendencia+RSI →
-dirección, probabilidad, confianza). Sus probabilidades NO están validadas aún:
-no presentarlas como fiables hasta pasar el backtesting de Fase 2.
+- `src/forecast.py::predict` (momentum+tendencia+RSI → dirección, probabilidad, confianza).
+  Réplica vectorizada del núcleo en `src/backtest.py::prob_up` — si se toca una, sincronizar la otra.
+- **Calibración MEDIDA:** `src/calibration.py::reliability` (curva de fiabilidad + Brier).
 
-## Cuándo usar
-- Antes de decidir una operación (manual o automática).
-- Para responder "¿qué probabilidad hay de X en el horizonte Y?".
+## VEREDICTO VIGENTE (no opcional al comunicar)
+Las probabilidades del baseline están **descalibradas con skill NEGATIVO** (BTC 1h −12.6%,
+BTC 4h −23.1%, ETH 1h −18.0%, ETH 4h −30.1%): la frecuencia observada se queda en ~50%
+diga lo que diga el modelo. Por tanto:
+- **NUNCA** presentar `probability`/`confidence` como probabilidades reales.
+- **NUNCA** usarlas para sizing (Kelly) ni como filtro de "confianza" con significado.
+- Toda salida al usuario debe etiquetarlas como *score sin calibrar* (la pestaña Ciclo
+  del dashboard ya lo hace con su banner y el expander de calibración).
 
 ## Procedimiento
-1. Cargar datos (skill `market-data`) y construir features: retornos, volatilidad (ATR), momentum (RSI/MACD), volumen, régimen de mercado.
-2. Aplicar un modelo de predicción:
-   - **Base**: frecuencia histórica condicionada (qué pasó tras estados similares).
-   - **Avanzado**: clasificador (regresión logística / gradient boosting) o modelo de series temporales, con **validación temporal** (walk-forward), nunca aleatoria.
-3. Devolver para el horizonte `forecast.horizon`:
-   - dirección esperada (alza/baja/lateral),
-   - **probabilidad** estimada,
-   - **confianza** (calibrada; p. ej. tamaño de muestra + estabilidad del modelo),
-   - rango esperado (intervalo).
-4. Si la confianza < `forecast.min_confidence`, marcar como "sin operar".
-
-## Reglas anti-autoengaño
-- Validación temporal obligatoria; nada de mirar el futuro.
-- Reportar siempre incertidumbre y tamaño de muestra.
-- Una predicción NO es una garantía; es una apuesta con probabilidad.
+1. Cargar datos reales (skill `market-data`); si `source == "synthetic"`, solo proponer con advertencia.
+2. Llamar a `forecast.predict` y devolver dirección + score, SIEMPRE con el descargo de calibración.
+3. Si el usuario quiere una probabilidad fiable: explicar que requiere un modelo nuevo
+   validado con `walk_forward_oos` y calibrado con `reliability` — hoy no existe.
 
 ## Aviso
-Información técnica, no asesoría financiera.
+Información técnica, no asesoría financiera. El baseline no tiene edge OOS demostrado.

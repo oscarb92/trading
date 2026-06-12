@@ -1,33 +1,35 @@
 ---
 name: signal
-description: Calcular indicadores técnicos y estimar la probabilidad/edge de un movimiento para un símbolo. Usar cuando el usuario pida "señal", "probabilidad de subida", "qué dicen los indicadores", "hay edge en este par" o quiera una recomendación de entrada/salida basada en datos.
+description: Analizar un símbolo con las familias de señal del proyecto (momentum, histéresis, régimen ADX, reversión a la media, patrones de velas) y reportar qué dicen — con su validez OOS medida. Usar cuando el usuario pida "señal", "qué dicen los indicadores", "hay edge en este par" o un análisis técnico de un símbolo.
 ---
 
 # Skill: signal
 
-Convierte datos de mercado en una señal accionable con una estimación de probabilidad.
+Análisis ad-hoc por familias de señal. El ciclo automático usa `forecast`; esta skill
+explora y compara estrategias sobre un símbolo concreto.
 
-> Rol vs `forecast`: esta skill es para análisis ad-hoc cuando el usuario pregunta por un
-> símbolo. El ciclo automático usa `forecast` (`src/forecast.py`). Reutilizar ese código
-> como base para no duplicar lógica de indicadores.
+## Código real (usar, no reinventar) — familias en `src/backtest.py`
+Todas con la misma interfaz `f(df) -> Series {-1, 0, 1}`:
+- `baseline_signal` (momentum+tendencia+RSI, bandas 0.55/0.45) y su núcleo `prob_up`.
+- `hysteresis_signal(enter, exit_)` — banda muerta contra el sobre-trading.
+- `regime_signal(enter, adx_min)` + `adx` — momentum solo en tendencia.
+- `mean_reversion_signal(lookback, entry_z, exit_z)` — contrarian por z-score.
+- `candlestick_signal(hold, trend_span)` — envolventes, martillo, estrella fugaz con contexto EMA.
 
-## Cuándo usar
-- Evaluar si hay edge en un símbolo ahora mismo.
-- Generar la señal que consumen `paper-trade` o `risk-manager`.
+## VEREDICTO VIGENTE (comunicarlo siempre)
+Las 5 familias fueron validadas con `src/validation.py::walk_forward_oos` en hasta
+16 mercados: **ninguna tiene edge OOS demostrado** (nulas empíricas p=0.97 direccional,
+p=0.59 market-neutral; velas 0/6). Lo único robusto: actúan como **overlay defensivo**
+(baten a buy & hold en ~74% de tramos bajistas, ~9% de alcistas). Ver pestaña
+🧭 Decisiones & Research del dashboard y `MEMORIA_PROYECTO.md` §11-§13.
 
 ## Procedimiento
-1. Cargar datos recientes (skill `market-data`).
-2. Calcular indicadores con `ta` o `pandas-ta`: medias (EMA), RSI, MACD, ATR, bandas de Bollinger, volumen.
-3. Combinar en una regla o modelo. Para "probabilidad" usar:
-   - Frecuencia histórica condicionada (p. ej. "tras esta señal, % de velas siguientes al alza"), o
-   - Un modelo simple (regresión logística / gradient boosting) sobre features, con validación temporal.
-4. Devolver: dirección (`largo`/`corto`/`fuera`), **probabilidad estimada**, y el **edge esperado** (prob × payoff − coste).
-5. Ser explícito sobre la incertidumbre y el tamaño de muestra.
+1. Cargar datos reales (skill `market-data`); nunca sintéticos.
+2. Calcular la(s) señal(es) pedidas y describir el estado actual (posición que tomaría cada familia).
+3. Si se afirma cualquier capacidad predictiva → respaldarla con `walk_forward_oos`,
+   no con el estado in-sample. Probabilidad sin validación OOS y tamaño de muestra no vale.
 
 ## Reglas
-- Una probabilidad sin tamaño de muestra ni validación out-of-sample no vale: reportarlos siempre.
-- No confundir correlación histórica con predicción garantizada.
-- La señal alimenta la gestión de riesgo, no es una orden directa.
-
-## Aviso
-Información técnica, no asesoría financiera.
+- La señal alimenta la gestión de riesgo; no es una orden ni una recomendación.
+- No probar variantes hasta que una "funcione": eso es p-hacking (regla del proyecto).
+- Información técnica, no asesoría financiera.

@@ -9,8 +9,14 @@ Cerebro de la automatización. Lee `automation_config.yaml` y ejecuta UNA pasada
 
 ## Código real (usar, no reinventar)
 El ciclo ya está implementado en `src/engine.py::run_cycle`. Ejecutar con:
-`python run.py` (CLI, ideal para tareas programadas) o desde `dashboard.py`.
+`python run.py` (CLI) o desde la pestaña 🔄 Ciclo de `dashboard.py`.
+**Tarea programada real:** "TradingApp-PaperCycle" (Programador de tareas de Windows,
+cada hora, lanza `run_cycle.bat` → log en `logs/cycle.log`).
 Esta skill orquesta y reporta; la lógica vive en `src/`.
+
+> Contexto: el forecast baseline NO tiene edge OOS y sus probabilidades están
+> descalibradas (skill negativo, ver `src/calibration.py`). El ciclo es una **demo de
+> simulación** para ejercitar el flujo paper, no un generador de recomendaciones.
 
 ## Cuándo usar
 - Cada vez que se dispara la tarea programada.
@@ -30,10 +36,11 @@ Esta skill orquesta y reporta; la lógica vive en `src/`.
 5. Si `schedule.managed_by: ia`, evaluar si conviene ajustar la cadencia (skill `schedule-control`).
 
 ## Guardrails (obligatorios)
-- Respetar SIEMPRE el kill-switch (`enabled`) y `max_daily_loss_pct` (si se alcanza, poner `enabled: false`).
-- **Nunca ejecutar sobre datos sintéticos**: si `FetchResult.source == "synthetic"` (red caída), solo proponer con advertencia, jamás operar.
-- Verificar la pérdida diaria real desde `journal/trades.csv` antes de abrir posiciones (corrección C2 de PLAN.md mientras no esté en el engine).
-- `auto_live` nunca opera fuera de los límites de `risk`, sin excepción.
+- Respetar SIEMPRE el kill-switch (`enabled`) y `max_daily_loss_pct` (el engine YA lee la
+  pérdida diaria real de `journal.today_pnl` y se desactiva al alcanzarla — C2 resuelta).
+- **Nunca ejecutar sobre datos sintéticos**: el engine solo ejecuta si `source == "binance"` (C1).
+- `auto_live` está **CONGELADO** por diseño (sin edge OOS demostrado); jamás activarlo ni
+  implementar `LiveBroker.open` sin aprobación humana explícita.
 - Ante cualquier error o dato faltante: no operar, notificar.
 - Toda ejecución en `auto_live` se registra antes y después.
 

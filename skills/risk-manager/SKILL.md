@@ -1,34 +1,31 @@
 ---
 name: risk-manager
-description: Calcular tamaño de posición, stop-loss/take-profit y aplicar límites de riesgo antes de enviar una orden. Usar cuando el usuario pregunte "cuánto invierto", "tamaño de posición", "dónde pongo el stop", "cuánto arriesgo" o antes de cualquier ejecución (paper o real).
+description: Calcular tamaño de posición, stops, Kelly fraccionado, stress test y exposición/correlación; aplicar límites de riesgo antes de cualquier orden. Usar cuando el usuario pregunte "cuánto invierto", "tamaño de posición", "dónde pongo el stop", "qué pasa si cae un 20%", "cuánto arriesgo" o antes de cualquier ejecución (paper).
 ---
 
 # Skill: risk-manager
 
-Decide CUÁNTO arriesgar. Es la última puerta antes de ejecutar una orden.
+Decide CUÁNTO arriesgar. Es la última puerta antes de ejecutar una orden, y el conjunto
+de utilidades informativas de la pestaña 🛡️ Riesgo del dashboard.
 
-## Código real (usar, no reinventar)
-`src/risk.py::size_position` ya implementa fracción fija, stop ~1.5×ATR, TP 1:1.5
-y límites (`max_per_trade_pct`, `max_open_positions`, `max_daily_loss_pct`).
-Ojo: el engine aún no le pasa la pérdida diaria real (corrección C2 en PLAN.md).
-
-## Cuándo usar
-- Antes de cada operación (paper o real).
-- Para definir stops y límites de exposición.
+## Código real (usar, no reinventar) — todo en `src/risk.py`
+- `size_position`: fracción fija, stop ~1.5×ATR, TP 1:1.5, límites (`max_per_trade_pct`,
+  `max_open_positions`, `max_daily_loss_pct`). El engine YA le pasa la pérdida diaria real
+  (`journal.today_pnl`, corrección C2 resuelta) y desactiva al alcanzar el límite (kill-switch).
+- `size_from_risk`: sizing por riesgo fijo con **apalancamiento implícito** (avisar si >1×).
+- `kelly_fraction` / `fractional_kelly` (≤ ½ Kelly, cap 20%): **si Kelly = 0, la apuesta
+  óptima es NO apostar** — y con el forecast actual (sin edge, probabilidades descalibradas)
+  Kelly basado en él sería ruina; no calcularlo con esas probabilidades.
+- `stress_test_gap`: shock instantáneo (p.ej. −20%) sobre el portfolio, equity antes/después
+  y stops cruzados (caso pesimista: el hueco salta los stops).
+- `exposure` y `correlation_matrix`: exposición bruta/neta y correlación de retornos
+  (BTC/ETH ≈ 0.82 → diversificación ilusoria entre cripto).
 
 ## Procedimiento
-1. Tomar la probabilidad/edge de la skill `signal` y el capital disponible.
-2. Calcular tamaño de posición:
-   - **Fracción fija** (recomendado al inicio): arriesgar 0.5–1% del capital por operación.
-   - **Kelly fraccionado** (avanzado): usar ≤ ½ Kelly para reducir volatilidad.
-3. Definir **stop-loss** (p. ej. múltiplo de ATR) y **take-profit** según ratio riesgo/beneficio (mínimo 1:1.5).
-4. Aplicar límites duros: máx. exposición por activo, máx. pérdida diaria, nº máx. de posiciones abiertas.
-5. Si la operación viola un límite, **rechazarla** y explicar por qué.
+1. Tomar capital y propuesta; calcular tamaño con fracción fija (0.5–1% por trade).
+2. Stop SIEMPRE definido; ratio mínimo 1:1.5; verificar límites duros de `automation_config.yaml`.
+3. Si viola un límite → **rechazar** y explicar. La IA puede reducir riesgo, nunca aumentarlo.
 
 ## Reglas
-- Ninguna operación sin stop definido.
 - Preservar capital > maximizar ganancia. Sobrevivir primero.
-- Estos cálculos son técnicos, no asesoría financiera; el usuario decide.
-
-## Salida
-Tamaño de posición, precio de stop y de objetivo, y veredicto (aprobar/rechazar).
+- Cálculos técnicos, no asesoría financiera; el usuario decide.

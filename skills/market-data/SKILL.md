@@ -1,42 +1,31 @@
 ---
 name: market-data
-description: Descargar, normalizar y cachear datos de mercado (OHLCV, orderbook, trades) desde exchanges vía CCXT/Binance. Usar cuando el usuario pida "bajar datos", "histórico de un par", "precios en vivo", "actualizar dataset" o necesite datos para backtest o señales.
+description: Descargar, normalizar y cachear datos de mercado OHLCV — cripto vía CCXT/Binance y multi-mercado (oro, petróleo, plata, índices/ETF, acciones) vía yfinance. Usar cuando el usuario pida "bajar datos", "histórico de un par", "precios en vivo", "actualizar dataset" o necesite datos para backtest o señales.
 ---
 
 # Skill: market-data
 
-Capa de obtención de datos de mercado. Fuente principal: **CCXT** (unificado), con **Binance** por defecto.
+Capa de datos del sandbox. Dos fuentes, un mismo esquema OHLCV (`ts, open, high, low, close, volume`).
 
-## Código real / estado
-`src/data.py::fetch_ohlcv` ya descarga OHLCV (con fallback **sintético** si falla la
-red — revisar `FetchResult.source` y NUNCA usar datos sintéticos para operar ni backtest).
-La capa de caché Parquet/DuckDB todavía NO existe: es la tarea principal de Fase 1
-(ver PLAN.md). Al implementarla, hacerlo en `src/store.py` e integrarla en `fetch_ohlcv`.
+## Código real (usar, no reinventar)
+- **Cripto (CCXT/Binance):** `src/data.py::fetch_ohlcv` (acepta `since` en ms para paginar)
+  y `current_price`. Fallback **sintético** si falla la red — revisar `FetchResult.source`.
+- **Multi-mercado (yfinance):** `src/marketdata.py::fetch_yahoo` (`source="yahoo"`,
+  auto-ajustado por splits/dividendos, descarta `close<=0`). Universo en `marketdata.UNIVERSE`
+  (16 instrumentos con etiqueta y clase); anualización por clase: `periods_per_year`
+  (252 bolsa / 365 cripto).
+- **Caché Parquet:** `src/store.py` — `save_ohlcv` (dedup + aviso de saltos >50%),
+  `load_ohlcv`, `detect_gaps`, `summary`, `resample_ohlcv` (1h→4h),
+  `update_history` (backfill paginado idempotente que NUNCA persiste datos sintéticos)
+  y `clear` para rehacer un histórico.
 
-## Cuándo usar
-- Descargar histórico OHLCV de uno o varios símbolos.
-- Suscribirse a precios/orderbook en tiempo real (WebSocket).
-- Refrescar el dataset local antes de un backtest.
-
-## Procedimiento
-1. Cargar el exchange con CCXT (`ccxt.binance()`; para datos en vivo usar `ccxt.pro`).
-2. Validar el símbolo (`BTC/USDT`) y el timeframe (`1m`, `5m`, `1h`, `1d`).
-3. Descargar con paginación (`fetch_ohlcv` por bloques de 1000 velas).
-4. Normalizar a DataFrame: `timestamp, open, high, low, close, volume` (UTC).
-5. Guardar en **Parquet** particionado por símbolo/timeframe en `data/`. Si ya existe, hacer append incremental sin duplicar.
-6. Reportar: rango de fechas, nº de velas, huecos detectados.
-
-## Ejemplo mínimo (Python)
-```python
-import ccxt, pandas as pd
-ex = ccxt.binance()
-ohlcv = ex.fetch_ohlcv("BTC/USDT", timeframe="1h", limit=1000)
-df = pd.DataFrame(ohlcv, columns=["ts","open","high","low","close","volume"])
-df["ts"] = pd.to_datetime(df["ts"], unit="ms", utc=True)
-df.to_parquet("data/BTC-USDT_1h.parquet")
-```
+## Comandos de descarga
+- Cripto: `python backtest.py --fresh --download 17520 --symbol BTC/USDT ETH/USDT` (2 años 1h).
+- Multi-mercado: `python cross_asset.py` (baja lo que falte) o `--refresh` (rehace todo).
 
 ## Reglas
-- Nunca usar claves API para datos públicos (no hacen falta).
-- Respetar rate limits: `ex.enableRateLimit = True`.
-- Registrar la descarga en `MEMORIA_PROYECTO.md` (bitácora).
+- **Nunca** usar datos `source == "synthetic"` para operar, backtestear ni guardar en `data/`.
+- Mercados no-24/7: los fines de semana NO son huecos; anualizar con `periods_per_year`.
+- Los futuros continuos de Yahoo (`GC=F`, `CL=F`, `SI=F`) son precios NO negociables
+  (roll back-ajustado); preferir sus ETF (GLD/SLV/USO) para análisis replicables.
+- Sin claves API para datos públicos; respetar rate limits (ya activado en `src/data.py`).

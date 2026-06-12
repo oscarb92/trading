@@ -12,10 +12,13 @@ Memoria persistente de operaciones. Es lo que permite aprender y medir el progre
 - Para revisar rendimiento acumulado y patrones.
 
 ## Procedimiento
-1. Registrar cada trade con `src/journal.py::log_trade` en `journal/trades.csv`. Esquema real:
+1. Registrar cada trade con `src/journal.py::log_trade` en `journal/trades.csv` (timestamp UTC
+   automático). Esquema real:
    `fecha, symbol, evento (open/close), lado, qty, precio, fee, pnl, prob, confianza, modo, nota`.
    No inventar otro esquema; si falta un campo, ampliarlo en `journal.py` primero.
-   Métricas acumuladas: `src/journal.py::metrics` (win rate, PnL total, wins/losses).
+   Métricas: `src/journal.py::metrics` (win rate, PnL total, wins/losses) y
+   `today_pnl` (alimenta el kill-switch de pérdida diaria del engine).
+   Visualización: pestaña 📓 Diario del dashboard.
 2. Tras cerrar, calcular y acumular: win rate, PnL total, mejor/peor trade, racha, drawdown.
 3. Periódicamente, resumir aprendizajes y anotarlos en `MEMORIA_PROYECTO.md` (sección Bitácora).
 4. Detectar patrones: ¿qué señales funcionan?, ¿en qué condiciones se pierde?

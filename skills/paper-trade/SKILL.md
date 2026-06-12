@@ -16,16 +16,18 @@ fees (0.1%) y slippage; el estado persiste en `state/portfolio.json` (`src/portf
 - Mantener un portfolio virtual con PnL.
 
 ## Procedimiento
-1. Recibir la predicción (skill `forecast` — es la que usa el ciclo automático) y el tamaño (skill `risk-manager`).
-2. Conectar a **Binance Testnet** vía CCXT con claves de testnet, o usar un motor de matching local sobre datos históricos/en vivo.
-3. Enviar la orden (market/limit), registrar fills, comisiones simuladas y slippage.
-4. Actualizar el portfolio: posición, efectivo, PnL realizado y no realizado.
-5. Registrar cada operación con la skill `trade-journal`.
+1. Recibir la propuesta (skill `forecast`) y el tamaño/stops (skill `risk-manager`).
+2. Ejecutar con el **motor local** `PaperBroker` (precios reales de mercado, fees+slippage
+   simulados); es lo que usa el engine en `auto_testnet` y la aprobación manual del dashboard.
+   El testnet de Binance vía `LiveBroker(testnet=True)` es opcional, solo para probar conexión.
+3. Actualizar el portfolio (posición, efectivo, PnL realizado/no realizado) — `Portfolio.save()`.
+4. Registrar cada operación con la skill `trade-journal`.
 
 ## Reglas
-- Usar SIEMPRE el endpoint de testnet en esta fase (`ex.set_sandbox_mode(True)`).
-- Claves de testnet ≠ claves reales. Guardarlas en `.env`, nunca en git.
-- Validar saldo y límites antes de enviar la orden.
+- Saldo simulado: `python run.py --deposit N` o pestaña 💼 Portfolio del dashboard.
+- Modelo contable PnL/margen: equity = cash + PnL no realizado (no doble-contar notional).
+- Si hay claves de testnet, en `.env`, nunca en git. Validar saldo y límites antes de la orden.
+- El paper trading continuo corre con la tarea programada "TradingApp-PaperCycle".
 
 ## Salida
 Confirmación de la operación simulada + estado actualizado del portfolio.

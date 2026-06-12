@@ -14,10 +14,13 @@ Controla CUÁNDO y EN QUÉ MODO corre la automatización. Es el panel de mando.
 ## Procedimiento
 1. Leer la config con `src/config.py::load_config` y guardarla con `save_config` (preserva defaults y formato).
 2. Aplicar el cambio solicitado:
-   - **Frecuencia**: actualizar `schedule.cron` (validar formato cron).
-   - **Modo**: cambiar `mode` entre `recomendacion` / `auto_testnet` / `auto_live`.
-   - **Encender/apagar**: `enabled: true|false` (kill-switch).
-3. Reflejar el cambio en la **tarea programada** real (crear/actualizar el schedule que dispara `auto-trader`).
+   - **Frecuencia**: actualizar `schedule.cron` Y la tarea de Windows (ver abajo).
+   - **Modo**: `recomendacion` / `auto_testnet`. (`auto_live` está CONGELADO: no ofrecerlo.)
+   - **Encender/apagar**: `enabled: true|false` (kill-switch; también en el sidebar del dashboard).
+3. **Tarea programada real: "TradingApp-PaperCycle"** (lanza `run_cycle.bat` cada hora; log en `logs/cycle.log`):
+   - Ver/gestionar en GUI: Programador de tareas (`taskschd.msc`) → Biblioteca → TradingApp-PaperCycle.
+   - Pausar: `schtasks /Change /TN "TradingApp-PaperCycle" /Disable` · Reanudar: `/Enable`.
+   - Probar ya: `schtasks /Run /TN "TradingApp-PaperCycle"` · Cambiar cadencia: recrear con `/SC` y `/MO`.
 4. Confirmar al usuario el nuevo estado y anotarlo en `MEMORIA_PROYECTO.md`.
 
 ## Ajuste autónomo (si managed_by: ia)

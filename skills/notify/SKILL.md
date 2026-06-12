@@ -16,7 +16,8 @@ Canal de comunicación entre la automatización y el usuario.
 1. Leer `notifications.channel` y `notify_on` de la config.
 2. Componer un mensaje claro y accionable. Para una recomendación incluir:
    - símbolo y lado (largo/corto),
-   - predicción + probabilidad + confianza,
+   - predicción + score (etiquetado como **sin calibrar** — las "probabilidades" del
+     forecast tienen skill negativo, ver `src/calibration.py`; nunca presentarlas como fiables),
    - tamaño propuesto, stop-loss y objetivo,
    - razón resumida,
    - acción requerida: **Aprobar / Rechazar / Ajustar**.

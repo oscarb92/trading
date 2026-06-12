@@ -9,9 +9,10 @@ journal, paper trading con precios reales y gestión de riesgo. NO promete renta
 from __future__ import annotations
 import json
 from pathlib import Path
-import altair as alt
 import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import streamlit as st
 
 from src.config import load_config, save_config
@@ -36,11 +37,6 @@ st.set_page_config(page_title="Trading App — Sandbox", layout="wide", page_ico
 def cached_price(symbol: str) -> float:
     return data_mod.current_price(symbol)
 
-
-@st.cache_data(ttl=30, show_spinner=False)
-def cached_ohlcv(symbol: str, timeframe: str = "1h", limit: int = 200):
-    res = data_mod.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
-    return res.df, res.source
 
 cfg = load_config()
 pf = Portfolio.load()
@@ -116,77 +112,75 @@ def _auto_cycle_tick():
                    ". Al cerrar la app no corre nada.")
 
 
-def _zoom_chart(series: pd.Series, key: str, title: str, area: bool = False,
-                extra: pd.Series | None = None, extra_title: str = "") -> None:
-    """Gráfica Altair ESTÁTICA (no captura la rueda del ratón al hacer scroll) con
-    controles de zoom: ➕ acerca, ➖ aleja, ⟲ resetea, y un slider para enfocar tramos.
-    Si se pasa `extra`, se dibuja una segunda gráfica con el MISMO tramo (p.ej. drawdown)."""
-    n = len(series)
-    wkey = f"{key}_rng"
-    if wkey not in st.session_state:
-        st.session_state[wkey] = (0, n - 1)
-    lo, hi = st.session_state[wkey]
-    lo, hi = max(0, min(int(lo), n - 2)), max(1, min(int(hi), n - 1))
-    st.session_state[wkey] = (lo, hi)        # re-clampar si cambió la longitud de la serie
-    span = hi - lo
-    cz = st.columns([1, 1, 1, 9])
-    if cz[0].button("➕", key=f"{key}_zi", help="Acercar (recorta el tramo un 25% por lado)"):
-        q = max(span // 4, 2)
-        st.session_state[wkey] = (lo + q, max(lo + q + 2, hi - q))
-    if cz[1].button("➖", key=f"{key}_zo", help="Alejar (amplía el tramo)"):
-        q = max(span // 2, 4)
-        st.session_state[wkey] = (max(0, lo - q), min(n - 1, hi + q))
-    if cz[2].button("⟲", key=f"{key}_zr", help="Ver la serie completa"):
-        st.session_state[wkey] = (0, n - 1)
-    cz[3].slider("Tramo (velas)", 0, n - 1, key=wkey, label_visibility="collapsed")
-    lo, hi = st.session_state[wkey]
+# --- Gráficas estilo app de mercado (Plotly): zoom con la barra de herramientas
+#     (lupa, +/-, autoescala, pan) y SIN captura de la rueda del ratón (scrollZoom off),
+#     así la página hace scroll normal. Colores verde/rojo estándar de trading. ---
+_UP, _DOWN, _BLUE = "#26a69a", "#ef5350", "#2962ff"
+_PLOTLY_CFG = {"scrollZoom": False, "displaylogo": False, "locale": "es",
+               "modeBarButtonsToRemove": ["lasso2d", "select2d"]}
 
-    def _draw(s: pd.Series, t: str, as_area: bool):
-        seg = s.iloc[lo:hi + 1]
-        # Columna interna fija: un título con puntos/paréntesis rompe el shorthand de Altair
-        dfc = pd.DataFrame({"vela": np.arange(lo, hi + 1), "valor": seg.values})
-        base = alt.Chart(dfc)
-        mark = base.mark_area(opacity=0.6) if as_area else base.mark_line()
-        ch = mark.encode(x=alt.X("vela:Q", title="vela"),
-                         y=alt.Y("valor:Q", title=t, scale=alt.Scale(zero=False)))
-        st.altair_chart(ch, width="stretch")            # sin .interactive(): el scroll no la mueve
 
-    st.markdown(f"**{title}**")
-    _draw(series, title, area)
-    if extra is not None:
-        st.markdown(f"**{extra_title}**")
-        _draw(extra, extra_title, True)
+def _candles_fig(d: pd.DataFrame, max_bars: int = 300) -> go.Figure:
+    """Velas japonesas + volumen (subgráfico), con selector de rango temporal."""
+    d = d.tail(max_bars)
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True,
+                        row_heights=[0.78, 0.22], vertical_spacing=0.03)
+    fig.add_trace(go.Candlestick(
+        x=d["ts"], open=d["open"], high=d["high"], low=d["low"], close=d["close"],
+        name="OHLC", increasing_line_color=_UP, decreasing_line_color=_DOWN,
+        increasing_fillcolor=_UP, decreasing_fillcolor=_DOWN), row=1, col=1)
+    vcolors = [_UP if c >= o else _DOWN for o, c in zip(d["open"], d["close"])]
+    fig.add_trace(go.Bar(x=d["ts"], y=d["volume"], marker_color=vcolors,
+                         opacity=0.5, name="Volumen"), row=2, col=1)
+    fig.update_layout(
+        template="plotly_white", height=520, margin=dict(l=10, r=10, t=10, b=10),
+        showlegend=False, dragmode="pan", xaxis_rangeslider_visible=False,
+        xaxis=dict(rangeselector=dict(buttons=[
+            dict(count=1, label="1d", step="day", stepmode="backward"),
+            dict(count=7, label="1sem", step="day", stepmode="backward"),
+            dict(count=1, label="1mes", step="month", stepmode="backward"),
+            dict(count=6, label="6m", step="month", stepmode="backward"),
+            dict(step="all", label="todo")])))
+    fig.update_yaxes(title_text=None)
+    return fig
 
-# ------------------------------------------------------------------ Sidebar
+
+def _equity_dd_fig(eq: pd.Series, dd: pd.Series) -> go.Figure:
+    """Curva de equity + drawdown enlazados (zoom/pan conjunto con la barra superior)."""
+    x = np.arange(len(eq))
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.7, 0.3],
+                        vertical_spacing=0.06,
+                        subplot_titles=("Curva de equity (capital relativo, base 1.0)",
+                                        "Drawdown"))
+    fig.add_trace(go.Scatter(x=x, y=eq, mode="lines", name="Equity",
+                             line=dict(color=_BLUE, width=1.6)), row=1, col=1)
+    fig.add_trace(go.Scatter(x=x, y=dd, mode="lines", name="Drawdown",
+                             line=dict(color=_DOWN, width=1), fill="tozeroy",
+                             fillcolor="rgba(239,83,80,0.25)"), row=2, col=1)
+    fig.update_layout(template="plotly_white", height=480, showlegend=False,
+                      margin=dict(l=10, r=10, t=30, b=10), dragmode="pan")
+    fig.update_xaxes(title_text="vela", row=2, col=1)
+    return fig
+
+# ------------------------------------------------------------------ Sidebar (solo estado)
 with st.sidebar:
-    st.header("⚙️ Control")
-    cfg["mode"] = st.selectbox(
-        "Modo", ["recomendacion", "auto_testnet", "auto_live"],
-        index=["recomendacion", "auto_testnet", "auto_live"].index(cfg.get("mode", "recomendacion")),
-        help="recomendacion: propone y esperas aprobación · auto_testnet: opera en paper · auto_live: real (bloqueado en Fase 1)",
-    )
-    cfg["enabled"] = st.toggle("Automatización activa (kill-switch)", value=cfg.get("enabled", False))
-    if cfg["mode"] == "auto_live":
-        st.error("auto_live está **congelado** por diseño: ninguna estrategia superó la validación "
-                 "OOS. La app es una herramienta, no un bot. No se ejecuta en real.")
-
+    st.header("📟 Estado")
+    st.markdown(f"**Modo:** `{cfg.get('mode', 'recomendacion')}`")
+    ks = st.toggle("Automatización activa (kill-switch)", value=bool(cfg.get("enabled", False)),
+                   key="sb_killswitch",
+                   help="Interruptor de emergencia: apágalo y el ciclo deja de operar al instante.")
+    if bool(ks) != bool(cfg.get("enabled", False)):     # guardar al vuelo (es el botón de pánico)
+        fresh = load_config()
+        fresh["enabled"] = bool(ks)
+        save_config(fresh)
+        cfg["enabled"] = bool(ks)
+    auto_on = bool(cfg["schedule"].get("app_auto", False))
+    every = int(cfg["schedule"].get("app_every_min", 60))
+    st.caption(("⏱️ Ciclo en-app: **activo** cada "
+                f"{every} min (con la app abierta)" if auto_on else "⏱️ Ciclo en-app: apagado")
+               + " · " + ("🟢 operando en paper" if cfg.get("enabled") else "⏸️ sin operar"))
     st.divider()
-    st.subheader("Programación")
-    cfg["schedule"]["cron"] = st.text_input("Cron", cfg["schedule"].get("cron", "0 * * * *"),
-                                            help="Ej: '0 * * * *' cada hora · '*/15 * * * *' cada 15 min")
-    cfg["schedule"]["managed_by"] = st.radio("Gestiona la frecuencia",
-                                             ["usuario", "ia"],
-                                             index=0 if cfg["schedule"].get("managed_by") == "usuario" else 1,
-                                             horizontal=True)
-    st.subheader("Predicción")
-    cfg["forecast"]["min_confidence"] = st.slider("Confianza mínima", 0.0, 1.0,
-                                                  float(cfg["forecast"].get("min_confidence", 0.6)), 0.05)
-    syms = st.text_input("Símbolos (coma)", ", ".join(cfg.get("symbols", [])))
-    cfg["symbols"] = [s.strip() for s in syms.split(",") if s.strip()]
-
-    if st.button("💾 Guardar configuración", width="stretch"):
-        save_config(cfg)
-        st.success("Configuración guardada.")
+    st.caption("Toda la configuración vive en la pestaña **⚙️ Configuración**.")
 
 # ------------------------------------------------------------------ Header
 st.title("📈 Trading App — Sandbox de research y simulación")
@@ -207,9 +201,10 @@ c3.metric("PnL no realizado", f"{unreal:,.2f}")
 c4.metric("PnL realizado", f"{pf.realized_pnl:,.2f}")
 c5.metric("Win rate", f"{m['win_rate']}%  ({m['trades']} ops)")
 
-tab_bt, tab_research, tab_risk, tab_pf, tab_cycle, tab_market, tab_journal, tab_wallets = st.tabs(
+(tab_bt, tab_research, tab_risk, tab_pf, tab_cycle, tab_market, tab_journal,
+ tab_wallets, tab_cfg) = st.tabs(
     ["🔬 Backtest & Validación", "🧭 Decisiones & Research", "🛡️ Riesgo", "💼 Portfolio",
-     "🔄 Ciclo", "📊 Mercado", "📓 Diario", "🔌 Conexiones"])
+     "🔄 Ciclo", "📊 Mercado", "📓 Diario", "🔌 Conexiones", "⚙️ Configuración"])
 
 # ------------------------------------------------------------------ Backtest
 with tab_bt:
@@ -305,9 +300,10 @@ with tab_bt:
                 k2[1].metric("Profit factor", m.profit_factor)
                 k2[2].metric("Coste acumulado", f"{m.cost_drag:.1%}")
                 k2[3].metric("Velas", m.bars)
-                _zoom_chart(btr["equity"], key="btchart",
-                            title="Curva de equity (capital relativo, base 1.0)",
-                            extra=btr["drawdown"], extra_title="Drawdown")
+                st.plotly_chart(_equity_dd_fig(btr["equity"], btr["drawdown"]),
+                                width="stretch", config=_PLOTLY_CFG)
+                st.caption("Zoom: lupa o ＋/− de la barra superior · arrastra para desplazarte · "
+                           "🏠 restaura. La rueda del ratón no mueve la gráfica.")
 
     oosr = st.session_state.get("oos_result")
     if oosr:
@@ -556,21 +552,15 @@ with tab_cycle:
                        "Aquí no lo hace: la frecuencia real se queda pegada a ~50% diga lo "
                        "que diga el modelo. Por eso Kelly con estas probabilidades sería ruina.")
 
-    sc1, sc2 = st.columns([3, 1])
-    cyc_auto = sc1.toggle("⏱️ Ciclo automático mientras la app esté abierta",
-                          value=bool(cfg["schedule"].get("app_auto", False)), key="cyc_auto",
-                          help="Sin tarea programada del sistema: corre solo con el dashboard "
-                               "abierto. Al cerrarlo, cero consumo. También respeta el kill-switch.")
-    cyc_every = sc2.number_input("Cada (min)", 5, 720,
-                                 int(cfg["schedule"].get("app_every_min", 60)), 5, key="cyc_every")
-    if (bool(cyc_auto) != bool(cfg["schedule"].get("app_auto", False))
-            or int(cyc_every) != int(cfg["schedule"].get("app_every_min", 60))):
-        fresh = load_config()                      # persistir SOLO estas dos claves
+    cyc_auto = st.toggle("⏱️ Ciclo automático mientras la app esté abierta",
+                         value=bool(cfg["schedule"].get("app_auto", False)), key="cyc_auto",
+                         help="Corre solo con el dashboard abierto; al cerrarlo, cero consumo. "
+                              "La frecuencia se ajusta en ⚙️ Configuración. Respeta el kill-switch.")
+    if bool(cyc_auto) != bool(cfg["schedule"].get("app_auto", False)):
+        fresh = load_config()                      # persistir SOLO esta clave
         fresh["schedule"]["app_auto"] = bool(cyc_auto)
-        fresh["schedule"]["app_every_min"] = int(cyc_every)
         save_config(fresh)
         cfg["schedule"]["app_auto"] = bool(cyc_auto)
-        cfg["schedule"]["app_every_min"] = int(cyc_every)
     _auto_cycle_tick()
 
     if st.button("▶️ Ejecutar una pasada", type="primary"):
@@ -611,14 +601,27 @@ with tab_cycle:
 
 # ------------------------------------------------------------------ Market
 with tab_market:
-    st.subheader("Mercado (precios reales)")
-    sym = st.selectbox("Símbolo", cfg.get("symbols", ["BTC/USDT"]))
-    df_raw, source = cached_ohlcv(sym, "1h", 200)
-    if source == "synthetic":
-        st.warning("Sin acceso a internet: mostrando datos SINTÉTICOS de desarrollo.")
-    df = df_raw.set_index("ts")
-    st.line_chart(df["close"])
-    st.caption(f"Fuente: {source} · {len(df)} velas · último: {df['close'].iloc[-1]:.2f}")
+    st.subheader("Mercado")
+    mkts = _available_markets()
+    mc1, mc2, mc3 = st.columns([2, 1, 1])
+    mket = mc1.selectbox("Mercado", mkts, format_func=lambda m: m["label"], key="mkt_sym")
+    mtf = mc2.radio("Timeframe", mket["tfs"], horizontal=True, key=f"mkt_tf_{mket['sym']}")
+    nbars = mc3.select_slider("Velas", [150, 300, 600, 1000], 300, key="mkt_nbars")
+    dfm = _load_tf(mket["sym"], mtf)
+    if dfm.empty:
+        st.info("Sin histórico local de este mercado. Descárgalo: cripto con "
+                "`python backtest.py --fresh --download 17520` · resto con `python cross_asset.py`.")
+    else:
+        last, prev = float(dfm["close"].iloc[-1]), float(dfm["close"].iloc[-2])
+        k1, k2, k3 = st.columns(3)
+        k1.metric(mket["label"], f"{last:,.2f}", f"{last / prev - 1:+.2%}")
+        if "/" in mket["sym"]:                              # cripto: precio vivo de Binance
+            k2.metric("Precio en vivo (Binance)", f"{cached_price(mket['sym']):,.2f}")
+        k3.metric("Última vela local", str(dfm["ts"].iloc[-1])[:16])
+        st.plotly_chart(_candles_fig(dfm, nbars), width="stretch", config=_PLOTLY_CFG)
+        st.caption("Velas japonesas + volumen · usa los botones 1d/1sem/1mes/6m/todo o la lupa "
+                   "y ＋/− de la barra para enfocar tramos; la rueda del ratón no mueve la gráfica. "
+                   "Histórico local — refréscalo con los comandos de descarga.")
 
 # ------------------------------------------------------------------ Journal
 with tab_journal:
@@ -631,3 +634,64 @@ with tab_journal:
                  f"**PnL total:** {mm['pnl_total']} · Ganadoras {mm['wins']} / Perdedoras {mm['losses']}")
     else:
         st.caption("Aún no hay operaciones registradas.")
+
+# ------------------------------------------------------------------ Configuración
+with tab_cfg:
+    st.subheader("⚙️ Configuración")
+    st.caption("Todos los ajustes en un solo sitio. Los cambios se aplican al pulsar **Guardar**. "
+               "El kill-switch de emergencia vive en la barra lateral.")
+    _FREQS = [("Cada 5 min", 5), ("Cada 15 min", 15), ("Cada 30 min", 30),
+              ("Cada hora", 60), ("Cada 4 horas", 240), ("Cada 12 horas", 720)]
+    cur_min = int(cfg["schedule"].get("app_every_min", 60))
+    freq_idx = min(range(len(_FREQS)), key=lambda i: abs(_FREQS[i][1] - cur_min))
+
+    with st.form("cfg_form"):
+        st.markdown("#### Ciclo de simulación")
+        c1f, c2f = st.columns(2)
+        f_mode = c1f.selectbox(
+            "Modo", ["recomendacion", "auto_testnet"],
+            index=1 if cfg.get("mode") == "auto_testnet" else 0,
+            help="recomendacion: propone y espera tu aprobación · auto_testnet: ejecuta en paper. "
+                 "(auto_live está congelado por diseño: sin edge OOS demostrado.)")
+        f_freq = c2f.selectbox("Frecuencia del ciclo automático", [f[0] for f in _FREQS],
+                               index=freq_idx,
+                               help="Cada cuánto corre el ciclo mientras la app está abierta. "
+                                    "Sin cron ni formatos crípticos.")
+        f_auto = st.toggle("Ciclo automático mientras la app esté abierta",
+                           value=bool(cfg["schedule"].get("app_auto", False)),
+                           help="Igual que el toggle de la pestaña Ciclo; al cerrar la app no corre nada.")
+        f_syms = st.text_input("Símbolos del ciclo (separados por coma)",
+                               ", ".join(cfg.get("symbols", [])),
+                               help="Pares cripto que evalúa cada pasada, p.ej. BTC/USDT, ETH/USDT")
+
+        st.markdown("#### Predicción")
+        f_conf = st.slider("Confianza mínima para proponer/operar", 0.0, 1.0,
+                           float(cfg["forecast"].get("min_confidence", 0.6)), 0.05,
+                           help="OJO: la 'confianza' del baseline está descalibrada (skill negativo). "
+                                "Valores altos ≈ el ciclo casi nunca opera; es un umbral de demo.")
+
+        st.markdown("#### Límites de riesgo (paper)")
+        r1, r2, r3 = st.columns(3)
+        f_per_trade = r1.number_input("Riesgo por trade (%)", 0.1, 10.0,
+                                      float(cfg["risk"].get("max_per_trade_pct", 1.0)), 0.1)
+        f_daily = r2.number_input("Pérdida diaria máx. (%)", 0.5, 20.0,
+                                  float(cfg["risk"].get("max_daily_loss_pct", 3.0)), 0.5,
+                                  help="Al alcanzarla, el kill-switch se apaga solo.")
+        f_maxpos = r3.number_input("Posiciones abiertas máx.", 1, 10,
+                                   int(cfg["risk"].get("max_open_positions", 3)), 1)
+
+        saved = st.form_submit_button("💾 Guardar configuración", type="primary",
+                                      width="stretch")
+    if saved:
+        fresh = load_config()
+        fresh["mode"] = f_mode
+        fresh["symbols"] = [s.strip() for s in f_syms.split(",") if s.strip()]
+        fresh["schedule"]["app_auto"] = bool(f_auto)
+        fresh["schedule"]["app_every_min"] = dict(_FREQS)[f_freq]
+        fresh["forecast"]["min_confidence"] = float(f_conf)
+        fresh["risk"]["max_per_trade_pct"] = float(f_per_trade)
+        fresh["risk"]["max_daily_loss_pct"] = float(f_daily)
+        fresh["risk"]["max_open_positions"] = int(f_maxpos)
+        save_config(fresh)
+        st.success("Configuración guardada.")
+        st.rerun()

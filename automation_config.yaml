@@ -5,7 +5,7 @@ schedule:
   managed_by: usuario
   ia_can_pause: true
   app_auto: true
-  app_every_min: 60
+  app_every_min: 30
 symbols:
 - BTC/USDT
 - ETH/USDT

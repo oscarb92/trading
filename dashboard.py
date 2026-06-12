@@ -162,9 +162,16 @@ def _equity_dd_fig(eq: pd.Series, dd: pd.Series) -> go.Figure:
     fig.update_xaxes(title_text="vela", row=2, col=1)
     return fig
 
-# ------------------------------------------------------------------ Sidebar (solo estado)
+# ------------------------------------------------------------------ Sidebar (menú + estado)
+PAGES = ["🔬 Backtest & Validación", "🧭 Decisiones & Research", "🛡️ Riesgo",
+         "💼 Portfolio", "🔄 Ciclo", "📊 Mercado", "📓 Diario", "🔌 Conexiones",
+         "⚙️ Configuración"]
+
 with st.sidebar:
-    st.header("📟 Estado")
+    st.markdown("## 📈 Trading App")
+    page = st.radio("Menú", PAGES, key="nav_page", label_visibility="collapsed")
+    st.divider()
+    st.markdown("#### 📟 Estado")
     st.markdown(f"**Modo:** `{cfg.get('mode', 'recomendacion')}`")
     ks = st.toggle("Automatización activa (kill-switch)", value=bool(cfg.get("enabled", False)),
                    key="sb_killswitch",
@@ -180,7 +187,7 @@ with st.sidebar:
                 f"{every} min (con la app abierta)" if auto_on else "⏱️ Ciclo en-app: apagado")
                + " · " + ("🟢 operando en paper" if cfg.get("enabled") else "⏸️ sin operar"))
     st.divider()
-    st.caption("Toda la configuración vive en la pestaña **⚙️ Configuración**.")
+    st.caption("Toda la configuración vive en **⚙️ Configuración** (menú).")
 
 # ------------------------------------------------------------------ Header
 st.title("📈 Trading App — Sandbox de research y simulación")
@@ -201,13 +208,15 @@ c3.metric("PnL no realizado", f"{unreal:,.2f}")
 c4.metric("PnL realizado", f"{pf.realized_pnl:,.2f}")
 c5.metric("Win rate", f"{m['win_rate']}%  ({m['trades']} ops)")
 
-(tab_bt, tab_research, tab_risk, tab_pf, tab_cycle, tab_market, tab_journal,
- tab_wallets, tab_cfg) = st.tabs(
-    ["🔬 Backtest & Validación", "🧭 Decisiones & Research", "🛡️ Riesgo", "💼 Portfolio",
-     "🔄 Ciclo", "📊 Mercado", "📓 Diario", "🔌 Conexiones", "⚙️ Configuración"])
+# El tick del ciclo automático corre SIEMPRE (independiente de la sección activa):
+# con menú lateral solo se renderiza una sección, y el ciclo no puede depender de
+# que el usuario esté mirando la de Ciclo.
+_auto_cycle_tick()
+
+st.markdown(f"### {page}")
 
 # ------------------------------------------------------------------ Backtest
-with tab_bt:
+if page == "🔬 Backtest & Validación":
     st.subheader("Backtest honesto + validación out-of-sample")
     st.caption("Costes 0.1% fee + 0.05% slippage · señal aplicada a la vela siguiente (sin "
                "look-ahead). El backtest es in-sample (optimista); la validación OOS es el juez real.")
@@ -322,7 +331,7 @@ with tab_bt:
                 st.markdown("\n".join(val.to_markdown(res)))
 
 # ------------------------------------------------------------------ Decisiones & Research
-with tab_research:
+if page == "🧭 Decisiones & Research":
     st.subheader("📌 Qué dice la evidencia (decisiones soportadas por los tests)")
     st.caption("Resumen honesto de TODO el research validado out-of-sample. No es asesoría "
                "financiera: es lo que los datos del sandbox soportan y lo que no.")
@@ -390,7 +399,7 @@ with tab_research:
         st.caption("Aún no hay informes en reports/.")
 
 # ------------------------------------------------------------------ Riesgo
-with tab_risk:
+if page == "🛡️ Riesgo":
     st.subheader("Gestión de riesgo")
     st.caption("Calculadoras informativas sobre tu portfolio simulado. Información técnica, "
                "no asesoría financiera.")
@@ -471,7 +480,7 @@ with tab_risk:
                    "(todo cae junto en un crash).")
 
 # ------------------------------------------------------------------ Portfolio
-with tab_pf:
+if page == "💼 Portfolio":
     st.subheader("Agregar saldo simulado")
     col_a, col_b = st.columns([1, 3])
     amount = col_a.number_input("Monto", min_value=0.0, value=1000.0, step=100.0)
@@ -503,7 +512,7 @@ with tab_pf:
         st.caption("Sin posiciones abiertas.")
 
 # ------------------------------------------------------------------ Wallets
-with tab_wallets:
+if page == "🔌 Conexiones":
     st.subheader("Conectar monederos y brokers")
     st.caption("En Fase 1 la conexión es para **testnet/paper**. Las claves se usan solo en tu "
                "máquina. Nunca uses claves con permiso de retiro.")
@@ -527,7 +536,7 @@ with tab_wallets:
     st.info("Para operar REAL hace falta cambiar a modo auto_live (Fase 6) con aprobación explícita.")
 
 # ------------------------------------------------------------------ Cycle
-with tab_cycle:
+if page == "🔄 Ciclo":
     st.subheader("Correr ciclo (datos → predicción → riesgo → decisión)")
     st.warning("**Demo de simulación.** El forecast baseline NO tiene edge validado OOS y sus "
                "probabilidades NO están calibradas (skill negativo, ver abajo). Las propuestas "
@@ -561,7 +570,6 @@ with tab_cycle:
         fresh["schedule"]["app_auto"] = bool(cyc_auto)
         save_config(fresh)
         cfg["schedule"]["app_auto"] = bool(cyc_auto)
-    _auto_cycle_tick()
 
     if st.button("▶️ Ejecutar una pasada", type="primary"):
         result = run_cycle(cfg, pf)
@@ -600,7 +608,7 @@ with tab_cycle:
                     st.success("Ejecutado automáticamente.")
 
 # ------------------------------------------------------------------ Market
-with tab_market:
+if page == "📊 Mercado":
     st.subheader("Mercado")
     mkts = _available_markets()
     mc1, mc2, mc3 = st.columns([2, 1, 1])
@@ -624,7 +632,7 @@ with tab_market:
                    "Histórico local — refréscalo con los comandos de descarga.")
 
 # ------------------------------------------------------------------ Journal
-with tab_journal:
+if page == "📓 Diario":
     st.subheader("Diario de operaciones")
     jp = journal_mod.JOURNAL_PATH
     if jp.exists():
@@ -636,7 +644,7 @@ with tab_journal:
         st.caption("Aún no hay operaciones registradas.")
 
 # ------------------------------------------------------------------ Configuración
-with tab_cfg:
+if page == "⚙️ Configuración":
     st.subheader("⚙️ Configuración")
     st.caption("Todos los ajustes en un solo sitio. Los cambios se aplican al pulsar **Guardar**. "
                "El kill-switch de emergencia vive en la barra lateral.")

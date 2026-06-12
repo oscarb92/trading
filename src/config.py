@@ -22,6 +22,9 @@ DEFAULTS: dict[str, Any] = {
         "require_stop_loss": True,
     },
     "forecast": {"horizon": "4h", "min_confidence": 0.60},
+    # Futuros PAPER: apalancamiento simulado con funding y liquidación. Solo sandbox.
+    "futures": {"enabled": False, "leverage": 2, "max_leverage": 5,
+                "funding_8h_pct": 0.01, "maintenance_margin_pct": 0.5},
     "notifications": {"channel": "chat", "notify_on": ["recomendacion", "ejecucion", "error", "kill_switch"]},
 }
 

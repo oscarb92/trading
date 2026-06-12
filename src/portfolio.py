@@ -21,6 +21,10 @@ class Position:
     entry: float
     stop: float = 0.0
     take_profit: float = 0.0
+    # Futuros paper (defaults retro-compatibles con estados antiguos)
+    leverage: float = 1.0
+    liq_price: float = 0.0      # 0 = sin riesgo de liquidación (spot)
+    last_funding: str = ""      # ISO-8601 del último cobro de funding
 
 
 @dataclass

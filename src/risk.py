@@ -15,7 +15,8 @@ class RiskDecision:
 
 def size_position(price: float, equity: float, risk_cfg: dict,
                   direction: str, atr_pct: float = 0.02,
-                  open_positions: int = 0, daily_loss_pct: float = 0.0) -> RiskDecision:
+                  open_positions: int = 0, daily_loss_pct: float = 0.0,
+                  leverage: float = 1.0) -> RiskDecision:
     max_per_trade = risk_cfg.get("max_per_trade_pct", 1.0) / 100.0
     max_daily_loss = risk_cfg.get("max_daily_loss_pct", 3.0)
     max_open = risk_cfg.get("max_open_positions", 3)
@@ -33,9 +34,10 @@ def size_position(price: float, equity: float, risk_cfg: dict,
     stop_dist = max(price * atr_pct * 1.5, price * 0.002)
     qty = risk_amount / stop_dist
     notional = qty * price
-    # No exceder el equity disponible
-    if notional > equity:
-        qty = equity / price
+    # Tope de notional: equity × apalancamiento (1× = spot; >1× = futuros paper)
+    max_notional = equity * max(leverage, 1.0)
+    if notional > max_notional:
+        qty = max_notional / price
         notional = qty * price
 
     if direction == "alza":

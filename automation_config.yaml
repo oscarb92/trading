@@ -17,6 +17,12 @@ risk:
 forecast:
   horizon: 4h
   min_confidence: 0.0
+futures:
+  enabled: false
+  leverage: 2
+  max_leverage: 5
+  funding_8h_pct: 0.01
+  maintenance_margin_pct: 0.5
 notifications:
   channel: chat
   notify_on:

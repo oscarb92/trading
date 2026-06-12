@@ -24,6 +24,7 @@ from src import journal as journal_mod
 from src import store, backtest as bt, validation as val
 from src import risk as risk_mod
 from src import marketdata as md
+from src import futures as fut_mod
 
 REPORTS_DIR = Path(__file__).resolve().parent / "reports"
 
@@ -259,6 +260,12 @@ if page == "🔬 Backtest & Validación":
         sig_fn = bt.baseline_signal
         grid = [("baseline", bt.baseline_signal)]
 
+    lev_bt = st.select_slider(
+        "Apalancamiento (simulación de futuros: funding 0.01%/8h + liquidación intrabar)",
+        [1, 2, 3, 5], 1, key="bt_lev",
+        help="1 = spot (como siempre). >1 simula un perpetuo: multiplica PnL y costes, "
+             "y una mecha adversa puede LIQUIDAR la cuenta. La validación OOS siempre corre a 1×.")
+
     cga, cgb, cgc = st.columns([2, 2, 1])
     run_bt = cga.button("▶️ Ejecutar backtest", type="primary", width="stretch")
     run_oos = cgb.button("🔬 Validar out-of-sample", width="stretch")
@@ -274,6 +281,12 @@ if page == "🔬 Backtest & Validación":
         if df.empty:
             st.session_state["bt_result"] = {"error": "Sin datos locales. Cripto: "
                 "`python backtest.py --fresh --download 17520` · Multi-mercado: `python cross_asset.py`"}
+        elif lev_bt > 1:                                   # simulación de futuros
+            rf = fut_mod.simulate_futures(df, btf, sig_fn, leverage=lev_bt, ppy=ppy)
+            eq = rf["equity"].reset_index(drop=True)
+            st.session_state["bt_result"] = {"label": f"{label} · {lev_bt}× futuros",
+                                             "fut": rf["metrics"], "liq_bar": rf["liq_bar"],
+                                             "equity": eq, "drawdown": eq / eq.cummax() - 1}
         else:
             r = bt.run_backtest(df, btf, signal_fn=sig_fn, ppy=ppy)
             eq = r["equity"].reset_index(drop=True)
@@ -297,6 +310,21 @@ if page == "🔬 Backtest & Validación":
         with st.expander(f"📈 Backtest — {btr.get('label', '')}", expanded=True):
             if btr.get("error"):
                 st.error(btr["error"])
+            elif btr.get("fut"):                            # resultado en modo futuros
+                fm = btr["fut"]
+                k = st.columns(4)
+                k[0].metric("Retorno total", f"{fm['total_return']:.2%}")
+                k[1].metric("Sharpe (pre-liq.)", fm["sharpe"])
+                k[2].metric("Max drawdown", f"{fm['max_drawdown']:.2%}")
+                k[3].metric("Apalancamiento", f"{fm['leverage']:g}×")
+                if fm["liquidated"]:
+                    st.error(f"💀 **CUENTA LIQUIDADA** en la vela {btr['liq_bar']}: una mecha "
+                             "adversa superó el margen. A partir de ahí no hay recuperación: "
+                             "la cuenta queda a cero.")
+                st.plotly_chart(_equity_dd_fig(btr["equity"], btr["drawdown"]),
+                                width="stretch", config=_PLOTLY_CFG)
+                st.caption("Incluye funding 0.01%/8h y liquidación intrabar. Compara con 1× "
+                           "para ver el efecto puro del apalancamiento.")
             else:
                 m = btr["m"]
                 k = st.columns(4)
@@ -383,6 +411,7 @@ if page == "🧭 Decisiones & Research":
     st.divider()
     st.subheader("🧪 Informes de research (validación OOS)")
     REPORT_INDEX = [
+        ("futures.md", "Futuros paper: efecto del apalancamiento (1×-5×, funding y liquidación)"),
         ("cross_asset.md", "Cross-asset: 16 mercados, momentum+reversión direccional"),
         ("cross_sectional.md", "Market-neutral: prueba limpia alfa-vs-beta (riesgo-neutral)"),
         ("candlestick.md", "Patrones de velas japonesas: validación OOS"),
@@ -437,6 +466,16 @@ if page == "🛡️ Riesgo":
                  f"Kelly×{frac:.2f} (cap 20%): **{fk:.1%}** ≈ {fk * eq_in:,.2f}")
         if kf == 0:
             st.error("Kelly = 0: sin edge (W y R no compensan). La recomendación es NO apostar.")
+
+    with st.expander("📐 Precio de liquidación (futuros paper)"):
+        lc1, lc2, lc3 = st.columns(3)
+        l_entry = lc1.number_input("Precio de entrada", min_value=0.01, value=100.0, key="lq_e")
+        l_side = lc2.radio("Lado", ["long", "short"], horizontal=True, key="lq_s")
+        l_lev = lc3.select_slider("Apalancamiento", [1, 2, 3, 5, 10], 3, key="lq_l")
+        lp = fut_mod.liquidation_price(l_entry, l_side, l_lev)
+        move = abs(lp - l_entry) / l_entry
+        st.write(f"Liquidación ≈ **{lp:,.2f}** — un movimiento adverso del **{move:.1%}** "
+                 f"aniquila la cuenta a {l_lev}×. (Cripto se mueve 3-5% en un día normal.)")
 
     st.divider()
     # --- 2) Stress test ---
@@ -499,6 +538,8 @@ if page == "💼 Portfolio":
             rows.append({"Símbolo": s, "Lado": p.side, "Cantidad": round(p.qty, 6),
                          "Entrada": round(p.entry, 2), "Precio actual": round(px, 2),
                          "Stop": round(p.stop, 2), "Objetivo": round(p.take_profit, 2),
+                         "Apal.": f"{p.leverage:g}×" if p.leverage > 1 else "spot",
+                         "⚠ Liq.": round(p.liq_price, 2) if p.liq_price > 0 else "—",
                          "PnL": round(pnl, 2)})
         st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
         close_sym = st.selectbox("Cerrar posición", list(pf.positions.keys()))
@@ -688,6 +729,21 @@ if page == "⚙️ Configuración":
         f_maxpos = r3.number_input("Posiciones abiertas máx.", 1, 10,
                                    int(cfg["risk"].get("max_open_positions", 3)), 1)
 
+        st.markdown("#### Futuros (paper) — apalancamiento simulado")
+        fut_cfg = cfg.get("futures", {})
+        fu1, fu2, fu3 = st.columns([1, 1, 1])
+        f_fut_on = fu1.toggle("Modo futuros", value=bool(fut_cfg.get("enabled", False)),
+                              help="El ciclo abre posiciones apalancadas con funding y "
+                                   "precio de liquidación. SOLO simulación.")
+        f_lev = fu2.select_slider("Apalancamiento", [1, 2, 3, 5],
+                                  int(fut_cfg.get("leverage", 2)))
+        f_funding = fu3.number_input("Funding %/8h", 0.0, 0.2,
+                                     float(fut_cfg.get("funding_8h_pct", 0.01)), 0.01,
+                                     help="Los largos pagan, los cortos cobran. Típico: 0.01%.")
+        st.caption("⚠️ El research midió qué hace el apalancamiento sin edge: BTC −23% a 1× "
+                   "pasa a −99% a 5×; ETH buy&hold a 5× acaba **liquidado** "
+                   "(ver informe 'Futuros' en Decisiones & Research).")
+
         saved = st.form_submit_button("💾 Guardar configuración", type="primary",
                                       width="stretch")
     if saved:
@@ -700,6 +756,9 @@ if page == "⚙️ Configuración":
         fresh["risk"]["max_per_trade_pct"] = float(f_per_trade)
         fresh["risk"]["max_daily_loss_pct"] = float(f_daily)
         fresh["risk"]["max_open_positions"] = int(f_maxpos)
+        fresh["futures"]["enabled"] = bool(f_fut_on)
+        fresh["futures"]["leverage"] = int(f_lev)
+        fresh["futures"]["funding_8h_pct"] = float(f_funding)
         save_config(fresh)
         st.success("Configuración guardada.")
         st.rerun()

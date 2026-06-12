@@ -9,7 +9,9 @@ NO operar en real hasta validar en paper. Requiere claves en .env.
 """
 from __future__ import annotations
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from .portfolio import Portfolio, Position
+from .futures import liquidation_price
 
 
 @dataclass
@@ -32,14 +34,20 @@ class PaperBroker:
         return price * (1 + self.slippage) if side == "buy" else price * (1 - self.slippage)
 
     def open(self, symbol: str, side: str, qty: float, price: float,
-             stop: float = 0.0, tp: float = 0.0) -> Fill:
+             stop: float = 0.0, tp: float = 0.0,
+             leverage: float = 1.0, maint_pct: float = 0.5) -> Fill:
         ps = "long" if side == "buy" else "short"
         px = self._exec_price(price, side)
         fee = qty * px * self.fee_rate
         self.pf.cash -= fee
-        self.pf.positions[symbol] = Position(symbol, ps, qty, px, stop, tp)
+        liq = liquidation_price(px, ps, leverage, maint_pct) if leverage > 1 else 0.0
+        now = datetime.now(timezone.utc).isoformat()
+        self.pf.positions[symbol] = Position(symbol, ps, qty, px, stop, tp,
+                                             leverage=leverage, liq_price=liq,
+                                             last_funding=now)
         self.pf.save()
-        return Fill(symbol, side, qty, px, fee, "open")
+        return Fill(symbol, side, qty, px, fee,
+                    f"open lev={leverage:g}x liq={liq:.2f}" if leverage > 1 else "open")
 
     def close(self, symbol: str, price: float) -> Fill | None:
         pos = self.pf.positions.get(symbol)

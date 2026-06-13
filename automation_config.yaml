@@ -6,6 +6,7 @@ schedule:
   ia_can_pause: true
   app_auto: true
   app_every_min: 30
+  app_every_min_active: 5
 symbols:
 - BTC/USDT
 - ETH/USDT

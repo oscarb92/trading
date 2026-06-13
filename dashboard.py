@@ -89,14 +89,22 @@ def _mark_cycle_ts(ts: float) -> None:
 @st.fragment(run_every="60s")
 def _auto_cycle_tick():
     """Tic periódico (solo refresca este fragmento, no toda la app). Si el ciclo
-    automático está activo y ya tocó por intervalo, corre UNA pasada del engine."""
+    automático está activo y ya tocó por intervalo, corre UNA pasada del engine.
+
+    TICK ADAPTATIVO: con posiciones abiertas se usa el intervalo de vigilancia
+    (app_every_min_active, p.ej. 5 min) porque los stops/TP/liquidación SOLO se
+    evalúan en cada pasada — el broker paper no es un exchange que vigile 24/7."""
     import time as _t
     c = load_config()
     if not c["schedule"].get("app_auto"):
         st.caption("⏸️ Ciclo automático en-app apagado. Actívalo arriba: correrá solo "
                    "mientras esta app esté abierta.")
         return
-    every_s = max(int(c["schedule"].get("app_every_min", 60)), 1) * 60
+    base_min = max(int(c["schedule"].get("app_every_min", 60)), 1)
+    active_min = max(int(c["schedule"].get("app_every_min_active", 5)), 1)
+    has_pos = bool(Portfolio.load().positions)
+    every_min = min(base_min, active_min) if has_pos else base_min
+    every_s = every_min * 60
     now = _t.time()
     elapsed = now - _last_cycle_ts()
     if elapsed >= every_s:
@@ -108,9 +116,11 @@ def _auto_cycle_tick():
     else:
         remaining = int((every_s - elapsed) / 60) + 1
         prev = st.session_state.get("last_auto_at")
+        vigil = (f" · 👁️ VIGILANCIA: posición abierta → cada {every_min} min"
+                 if has_pos and every_min < base_min else "")
         st.caption(f"⏱️ Ciclo automático ACTIVO mientras la app esté abierta · próxima "
-                   f"pasada en ~{remaining} min" + (f" · última: {prev}" if prev else "") +
-                   ". Al cerrar la app no corre nada.")
+                   f"pasada en ~{remaining} min{vigil}"
+                   + (f" · última: {prev}" if prev else "") + ". Al cerrar la app no corre nada.")
 
 
 # --- Gráficas estilo app de mercado (Plotly): zoom con la barra de herramientas
@@ -728,6 +738,12 @@ if page == "⚙️ Configuración":
         f_auto = st.toggle("Ciclo automático mientras la app esté abierta",
                            value=bool(cfg["schedule"].get("app_auto", False)),
                            help="Igual que el toggle de la pestaña Ciclo; al cerrar la app no corre nada.")
+        f_active = st.select_slider(
+            "👁️ Vigilancia con posición abierta (min)", [1, 2, 5, 10, 15],
+            int(cfg["schedule"].get("app_every_min_active", 5)),
+            help="Con posiciones abiertas el ciclo corre a este ritmo (más rápido) para evaluar "
+                 "stops/TP/liquidación a tiempo: el broker paper solo los revisa en cada pasada, "
+                 "no es un exchange que vigile 24/7. Sin posiciones, rige la frecuencia normal.")
         f_syms = st.text_input("Símbolos del ciclo (separados por coma)",
                                ", ".join(cfg.get("symbols", [])),
                                help="Pares cripto que evalúa cada pasada, p.ej. BTC/USDT, ETH/USDT")
@@ -771,6 +787,7 @@ if page == "⚙️ Configuración":
         fresh["symbols"] = [s.strip() for s in f_syms.split(",") if s.strip()]
         fresh["schedule"]["app_auto"] = bool(f_auto)
         fresh["schedule"]["app_every_min"] = dict(_FREQS)[f_freq]
+        fresh["schedule"]["app_every_min_active"] = int(f_active)
         fresh["forecast"]["min_confidence"] = float(f_conf)
         fresh["risk"]["max_per_trade_pct"] = float(f_per_trade)
         fresh["risk"]["max_daily_loss_pct"] = float(f_daily)

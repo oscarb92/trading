@@ -13,7 +13,10 @@ DEFAULTS: dict[str, Any] = {
     "mode": "recomendacion",
     "schedule": {"cron": "0 * * * *", "managed_by": "usuario", "ia_can_pause": True,
                  # Ciclo en-app: corre solo mientras el dashboard está abierto (sin tarea de SO)
-                 "app_auto": False, "app_every_min": 60},
+                 "app_auto": False, "app_every_min": 60,
+                 # Tick adaptativo: con posiciones ABIERTAS se vigila más seguido (stops/liq
+                 # solo se evalúan en cada pasada; el broker paper no es un exchange 24/7)
+                 "app_every_min_active": 5},
     "symbols": ["BTC/USDT", "ETH/USDT"],
     "risk": {
         "max_per_trade_pct": 1.0,

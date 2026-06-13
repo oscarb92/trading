@@ -57,3 +57,82 @@ def verdict(r: dict) -> str:
                 "calibradas: no usarlas para sizing ni como 'confianza' real.")
     return (f"Skill {r['skill']:+.2%} sobre la base (Brier {r['brier']} vs {r['brier_base']}). "
             "Modesto: verificar estabilidad por subperiodos antes de fiarse.")
+
+
+# ---------------------------------------------------------------------------
+# RE-calibración (Platt scaling): reaprende el mapa score -> probabilidad con
+# datos, en vez de la sigmoide de constantes a mano. Importante: calibrar
+# arregla la MENTIRA del número, no crea poder predictivo. Si el score no
+# discrimina, el calibrador honesto colapsa todo a la tasa base (~50%) = "no sé".
+# ---------------------------------------------------------------------------
+
+def platt_fit(x: np.ndarray, y: np.ndarray, iters: int = 60) -> tuple[float, float]:
+    """Regresión logística 1D por Newton-Raphson: P(y=1) = sigmoid(a·x + b).
+
+    Sin sklearn: dos parámetros, hessiana 2x2 cerrada. `x` es el logit crudo del
+    modelo (o el score), `y` los resultados observados {0,1}.
+    """
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    a, b = 1.0, 0.0
+    for _ in range(iters):
+        z = np.clip(a * x + b, -35, 35)
+        p = 1.0 / (1.0 + np.exp(-z))
+        g_a = float(np.sum((p - y) * x))            # gradiente
+        g_b = float(np.sum(p - y))
+        w = p * (1 - p)
+        h_aa = float(np.sum(w * x * x)) + 1e-9      # hessiana
+        h_ab = float(np.sum(w * x))
+        h_bb = float(np.sum(w)) + 1e-9
+        det = h_aa * h_bb - h_ab * h_ab
+        if abs(det) < 1e-12:
+            break
+        da = (g_a * h_bb - g_b * h_ab) / det
+        db = (g_b * h_aa - g_a * h_ab) / det
+        a, b = a - da, b - db
+        if abs(da) < 1e-10 and abs(db) < 1e-10:
+            break
+    return float(a), float(b)
+
+
+def _logit(p: pd.Series) -> pd.Series:
+    p = p.clip(1e-6, 1 - 1e-6)
+    return np.log(p / (1 - p))
+
+
+def walkforward_calibration(df: pd.DataFrame, n_bins: int = 10) -> dict:
+    """Calibra en la 1ª mitad (train) y evalúa en la 2ª (test): raw vs calibrado.
+
+    Sin look-ahead: los parámetros (a, b) solo ven el pasado. Devuelve Brier/skill
+    de ambas versiones en TEST, los parámetros aprendidos y la dispersión de las
+    probabilidades calibradas (si ~0, el calibrador dice "no sé" siempre — que es
+    la respuesta honesta de un score sin señal).
+    """
+    p_raw = bt.prob_up(df)
+    ret_next = df["close"].astype(float).pct_change().shift(-1)
+    mask = p_raw.notna() & ret_next.notna()
+    p_raw = p_raw[mask].astype(float).reset_index(drop=True)
+    y = (ret_next[mask] > 0).astype(float).reset_index(drop=True)
+    n = len(p_raw)
+    if n < 1000:
+        return {"n": n, "error": "muestra insuficiente"}
+    half = n // 2
+    x = _logit(p_raw)
+
+    a, b = platt_fit(x.iloc[:half].values, y.iloc[:half].values)
+    z = np.clip(a * x.iloc[half:].values + b, -35, 35)
+    p_cal = 1.0 / (1.0 + np.exp(-z))
+    p_test_raw = p_raw.iloc[half:].values
+    y_test = y.iloc[half:].values
+
+    base = float(y_test.mean())
+    brier_base = float(((base - y_test) ** 2).mean())
+    brier_raw = float(((p_test_raw - y_test) ** 2).mean())
+    brier_cal = float(((p_cal - y_test) ** 2).mean())
+    return {"n": n, "n_test": int(n - half), "a": round(a, 4), "b": round(b, 4),
+            "base_rate": round(base, 4), "brier_base": round(brier_base, 4),
+            "brier_raw": round(brier_raw, 4), "brier_cal": round(brier_cal, 4),
+            "skill_raw": round(1 - brier_raw / brier_base, 4),
+            "skill_cal": round(1 - brier_cal / brier_base, 4),
+            "cal_prob_media": round(float(p_cal.mean()), 4),
+            "cal_prob_std": round(float(p_cal.std()), 4)}

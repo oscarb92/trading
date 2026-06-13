@@ -602,6 +602,25 @@ if page == "🔄 Ciclo":
                        "Aquí no lo hace: la frecuencia real se queda pegada a ~50% diga lo "
                        "que diga el modelo. Por eso Kelly con estas probabilidades sería ruina.")
 
+            @st.cache_data(ttl=3600, show_spinner=False)
+            def _wf_cal(sym: str, tf: str):
+                d = _load_tf(sym, tf)
+                return cal_mod.walkforward_calibration(d) if len(d) > 1000 else None
+
+            rc = _wf_cal(csym, ctf)
+            if rc and "error" not in rc:
+                st.markdown("**¿Y si re-calibramos?** (Platt scaling: el mapa score→probabilidad "
+                            "se re-aprende con la 1ª mitad del histórico y se evalúa en la 2ª)")
+                cc = st.columns(3)
+                cc[0].metric("Skill crudo", f"{rc['skill_raw']:+.2%}")
+                cc[1].metric("Skill calibrado", f"{rc['skill_cal']:+.2%}")
+                cc[2].metric("Prob. calibrada (todas)", f"{rc['cal_prob_media']:.0%} ± {rc['cal_prob_std']:.1%}")
+                st.info("Calibrar **repara la mentira** (el skill vuelve a ≈0) pero **revela la "
+                        "verdad**: el modelo calibrado dice '~50%' siempre — es decir, *no sé*. "
+                        "La calibración no crea conocimiento, solo deja de inventarlo. Un ciclo "
+                        "que usara la probabilidad calibrada no operaría nunca: esa ES la "
+                        "recomendación estadísticamente honesta de este forecast.")
+
     cyc_auto = st.toggle("⏱️ Ciclo automático mientras la app esté abierta",
                          value=bool(cfg["schedule"].get("app_auto", False)), key="cyc_auto",
                          help="Corre solo con el dashboard abierto; al cerrarlo, cero consumo. "

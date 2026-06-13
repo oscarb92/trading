@@ -631,6 +631,27 @@ if page == "🔄 Ciclo":
                         "que usara la probabilidad calibrada no operaría nunca: esa ES la "
                         "recomendación estadísticamente honesta de este forecast.")
 
+            from src import volforecast as vf_mod
+
+            @st.cache_data(ttl=3600, show_spinner=False)
+            def _vol_skill(sym: str, tf: str):
+                d = _load_tf(sym, tf)
+                return vf_mod.vol_skill(d) if len(d) > 1000 else None
+
+            rv = _vol_skill(csym, ctf)
+            if rv and "error" not in rv:
+                st.markdown("**✅ Lo que SÍ se puede predecir: la VOLATILIDAD** (EWMA evaluada "
+                            "con la misma vara: pronóstico causal, 2ª mitad del histórico)")
+                cv = st.columns(3)
+                cv[0].metric("Skill direccional", "≈ 0%", help="La dirección no se predice.")
+                cv[1].metric("Skill de volatilidad", f"{rv['skill']:+.1%}")
+                cv[2].metric("Corr. pronóstico↔realizado", f"{rv['corr']:+.2f}")
+                st.caption("La volatilidad se agrupa (días movidos siguen a días movidos) y por "
+                           "eso SÍ se pronostica — es el hallazgo más robusto de las finanzas "
+                           "empíricas. La app ya la usa donde aporta sin necesitar dirección: "
+                           "stops ~1.5×ATR y tamaño de posición (a más vol prevista, posición "
+                           "más pequeña). Predecir el riesgo, no el rumbo.")
+
     cyc_auto = st.toggle("⏱️ Ciclo automático mientras la app esté abierta",
                          value=bool(cfg["schedule"].get("app_auto", False)), key="cyc_auto",
                          help="Corre solo con el dashboard abierto; al cerrarlo, cero consumo. "

@@ -45,7 +45,10 @@ def predict(df: pd.DataFrame, symbol: str, horizon: str = "4h") -> Forecast:
     ema_slow = _ema(close, 26)
     rsi = _rsi(close, 14)
     ret = close.pct_change()
-    vol = ret.rolling(20).std().iloc[-1]
+    # Vol EWMA (RiskMetrics): la única magnitud con skill predictivo medido (+ ver
+    # volforecast.py). Alimenta stops/sizing y la penalización de confianza.
+    from .volforecast import ewma_vol
+    vol = float(ewma_vol(ret).iloc[-1])
     mom = (close.iloc[-1] / close.iloc[-10] - 1)          # momentum 10 velas
     trend = (ema_fast.iloc[-1] - ema_slow.iloc[-1]) / close.iloc[-1]
     rsi_now = rsi.iloc[-1]
